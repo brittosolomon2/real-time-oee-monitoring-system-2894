@@ -1,0 +1,4 @@
+{
+    "command": "npm install",
+    "working_directory": "/home/kavia/workspace/code-generation/real-time-oee-monitoring-system-2894/oee_backend_api"
+}
