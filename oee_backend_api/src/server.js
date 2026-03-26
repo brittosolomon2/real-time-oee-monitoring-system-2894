@@ -1,8 +1,33 @@
 const app = require('./app');
 const { initDb, closeDb } = require('./db');
 
-const PORT = process.env.PORT || 3000;
-const HOST = process.env.HOST || '0.0.0.0';
+/**
+ * Resolve the host/port the server should bind to.
+ *
+ * Preview environments typically expect the backend to be reachable on a fixed port.
+ * We default to 0.0.0.0:3001, but still allow overrides via env vars.
+ *
+ * Supported overrides:
+ * - PORT: numeric TCP port
+ * - HOST: bind host (e.g. 127.0.0.1, 0.0.0.0)
+ */
+function getBindConfig() {
+  const DEFAULT_PORT = 3001;
+  const DEFAULT_HOST = '0.0.0.0';
+
+  const portRaw = process.env.PORT;
+  const hostRaw = process.env.HOST;
+
+  const parsedPort = portRaw ? Number.parseInt(String(portRaw), 10) : NaN;
+  const port =
+    Number.isFinite(parsedPort) && parsedPort > 0 && parsedPort < 65536 ? parsedPort : DEFAULT_PORT;
+
+  const host = (hostRaw && String(hostRaw).trim()) || DEFAULT_HOST;
+
+  return { host, port };
+}
+
+const { port: PORT, host: HOST } = getBindConfig();
 
 let server = null;
 
