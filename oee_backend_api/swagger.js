@@ -9,6 +9,17 @@ const options = {
       description:
         'Express API for production run logging, downtime/quality events, and live OEE calculation.',
     },
+    components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+          description:
+            'JWT Authorization header using the Bearer scheme. Example: "Authorization: Bearer {token}"',
+        },
+      },
+    },
   },
   apis: ['./src/routes/*.js'], // Path to the API docs
 };

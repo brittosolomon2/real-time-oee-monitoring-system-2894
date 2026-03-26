@@ -6,6 +6,8 @@ const runsController = require('../controllers/runs');
 const downtimeController = require('../controllers/downtime');
 const qualityController = require('../controllers/quality');
 const oeeController = require('../controllers/oee');
+const authController = require('../controllers/auth');
+const { requireAuth, requireRole } = require('../middleware');
 
 const router = express.Router();
 
@@ -14,6 +16,8 @@ const router = express.Router();
  * tags:
  *   - name: Health
  *     description: Service health and basic checks
+ *   - name: Auth
+ *     description: Authentication and user management
  *   - name: Reference
  *     description: Reference data such as lines and shifts
  *   - name: Runs
@@ -54,16 +58,29 @@ const router = express.Router();
 router.get('/', healthController.check.bind(healthController));
 
 /**
+ * Auth routes
+ */
+router.post('/api/auth/login', authController.login.bind(authController));
+router.post(
+  '/api/auth/users',
+  requireAuth(),
+  requireRole('manager'),
+  authController.createUser.bind(authController)
+);
+
+/**
  * @swagger
  * /api/lines:
  *   get:
  *     summary: List production lines
  *     tags: [Reference]
+ *     security:
+ *       - bearerAuth: []
  *     responses:
  *       200:
  *         description: Lines list
  */
-router.get('/api/lines', linesController.check.bind(linesController));
+router.get('/api/lines', requireAuth(), linesController.check.bind(linesController));
 
 /**
  * @swagger
@@ -71,11 +88,13 @@ router.get('/api/lines', linesController.check.bind(linesController));
  *   get:
  *     summary: List shifts
  *     tags: [Reference]
+ *     security:
+ *       - bearerAuth: []
  *     responses:
  *       200:
  *         description: Shifts list
  */
-router.get('/api/shifts', shiftsController.list.bind(shiftsController));
+router.get('/api/shifts', requireAuth(), shiftsController.list.bind(shiftsController));
 
 /**
  * @swagger
@@ -83,6 +102,8 @@ router.get('/api/shifts', shiftsController.list.bind(shiftsController));
  *   post:
  *     summary: Create a production run
  *     tags: [Runs]
+ *     security:
+ *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -115,7 +136,7 @@ router.get('/api/shifts', shiftsController.list.bind(shiftsController));
  *       201:
  *         description: Created run
  */
-router.post('/api/runs', runsController.create.bind(runsController));
+router.post('/api/runs', requireAuth(), runsController.create.bind(runsController));
 
 /**
  * @swagger
@@ -123,6 +144,8 @@ router.post('/api/runs', runsController.create.bind(runsController));
  *   get:
  *     summary: Get a production run
  *     tags: [Runs]
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: runId
@@ -135,7 +158,7 @@ router.post('/api/runs', runsController.create.bind(runsController));
  *       404:
  *         description: Not found
  */
-router.get('/api/runs/:runId', runsController.get.bind(runsController));
+router.get('/api/runs/:runId', requireAuth(), runsController.get.bind(runsController));
 
 /**
  * @swagger
@@ -143,6 +166,8 @@ router.get('/api/runs/:runId', runsController.get.bind(runsController));
  *   post:
  *     summary: End a production run
  *     tags: [Runs]
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: runId
@@ -166,7 +191,7 @@ router.get('/api/runs/:runId', runsController.get.bind(runsController));
  *       404:
  *         description: Not found
  */
-router.post('/api/runs/:runId/end', runsController.end.bind(runsController));
+router.post('/api/runs/:runId/end', requireAuth(), runsController.end.bind(runsController));
 
 /**
  * @swagger
@@ -174,6 +199,8 @@ router.post('/api/runs/:runId/end', runsController.end.bind(runsController));
  *   post:
  *     summary: Log a downtime event
  *     tags: [Events]
+ *     security:
+ *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -198,7 +225,7 @@ router.post('/api/runs/:runId/end', runsController.end.bind(runsController));
  *       404:
  *         description: Run not found
  */
-router.post('/api/events/downtime', downtimeController.create.bind(downtimeController));
+router.post('/api/events/downtime', requireAuth(), downtimeController.create.bind(downtimeController));
 
 /**
  * @swagger
@@ -206,6 +233,8 @@ router.post('/api/events/downtime', downtimeController.create.bind(downtimeContr
  *   post:
  *     summary: Log a quality event (good/reject counts)
  *     tags: [Events]
+ *     security:
+ *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -231,7 +260,7 @@ router.post('/api/events/downtime', downtimeController.create.bind(downtimeContr
  *       404:
  *         description: Run not found
  */
-router.post('/api/events/quality', qualityController.create.bind(qualityController));
+router.post('/api/events/quality', requireAuth(), qualityController.create.bind(qualityController));
 
 /**
  * @swagger
@@ -239,6 +268,8 @@ router.post('/api/events/quality', qualityController.create.bind(qualityControll
  *   get:
  *     summary: Get calculated OEE for a run (uses live now() if run not ended)
  *     tags: [OEE]
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: runId
@@ -251,6 +282,6 @@ router.post('/api/events/quality', qualityController.create.bind(qualityControll
  *       404:
  *         description: Run not found
  */
-router.get('/api/oee/runs/:runId', oeeController.getForRun.bind(oeeController));
+router.get('/api/oee/runs/:runId', requireAuth(), oeeController.getForRun.bind(oeeController));
 
 module.exports = router;

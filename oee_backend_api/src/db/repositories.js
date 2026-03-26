@@ -189,6 +189,55 @@ async function getQualityTotalsForRun(runId) {
   };
 }
 
+/**
+ * PUBLIC_INTERFACE
+ * Fetch a user by email.
+ * @param {string} email
+ * @returns {Promise<{id: string, email: string, password_hash: string, role: string, is_active: boolean}|null>}
+ */
+async function getUserByEmail(email) {
+  const db = getDb();
+  const e = String(email || '').trim().toLowerCase();
+  if (!e) return null;
+  const res = await db.query(
+    'SELECT id, email, password_hash, role, is_active FROM users WHERE email = $1',
+    [e]
+  );
+  return res.rows[0] || null;
+}
+
+/**
+ * PUBLIC_INTERFACE
+ * Fetch a user by id.
+ * @param {string} id
+ * @returns {Promise<{id: string, email: string, role: string, is_active: boolean}|null>}
+ */
+async function getUserById(id) {
+  const db = getDb();
+  const res = await db.query('SELECT id, email, role, is_active FROM users WHERE id = $1', [id]);
+  return res.rows[0] || null;
+}
+
+/**
+ * PUBLIC_INTERFACE
+ * Create a new user.
+ * @param {{email: string, password_hash: string, role: 'operator'|'supervisor'|'manager'}} payload
+ * @returns {Promise<{id: string, email: string, role: string, is_active: boolean}>}
+ */
+async function createUser(payload) {
+  const db = getDb();
+  const id = payload.id || randomId('user');
+  const email = String(payload.email || '').trim().toLowerCase();
+
+  await db.query(
+    `INSERT INTO users(id, email, password_hash, role, is_active, created_at, updated_at)
+     VALUES($1,$2,$3,$4,TRUE,NOW(),NOW())`,
+    [id, email, payload.password_hash, payload.role]
+  );
+
+  return getUserById(id);
+}
+
 module.exports = {
   listLines,
   listShifts,
@@ -199,4 +248,7 @@ module.exports = {
   createQualityEvent,
   getDowntimeSecondsForRun,
   getQualityTotalsForRun,
+  getUserByEmail,
+  getUserById,
+  createUser,
 };
