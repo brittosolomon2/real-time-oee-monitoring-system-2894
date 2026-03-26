@@ -1,8 +1,8 @@
 const { listLines } = require('../db/repositories');
 
 class LinesController {
-  check(req, res) {
-    const lines = listLines();
+  async check(req, res) {
+    const lines = await listLines();
     return res.status(200).json({ data: lines });
   }
 }

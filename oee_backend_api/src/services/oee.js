@@ -25,9 +25,11 @@ function secondsBetween(startIso, endIso) {
  *
  * Notes:
  * - If run is still active (ended_at null), calculations use "now" as the end time.
+ * @param {string} runId
+ * @returns {Promise<object|null>}
  */
-function calculateOeeForRun(runId) {
-  const run = getProductionRunById(runId);
+async function calculateOeeForRun(runId) {
+  const run = await getProductionRunById(runId);
   if (!run) {
     return null;
   }
@@ -36,11 +38,11 @@ function calculateOeeForRun(runId) {
   const elapsedSeconds = secondsBetween(run.started_at, endAt);
 
   const plannedSeconds = Math.max(0, Number(run.planned_production_seconds || 0));
-  const downtimeSeconds = Math.max(0, Number(getDowntimeSecondsForRun(runId) || 0));
+  const downtimeSeconds = Math.max(0, Number((await getDowntimeSecondsForRun(runId)) || 0));
   const operatingSeconds = Math.max(0, elapsedSeconds - downtimeSeconds);
 
   const idealCycle = Math.max(0, Number(run.ideal_cycle_time_seconds || 0));
-  const quality = getQualityTotalsForRun(runId);
+  const quality = await getQualityTotalsForRun(runId);
 
   const good = Math.max(0, Number(quality.good_total || 0));
   const reject = Math.max(0, Number(quality.reject_total || 0));

@@ -5,7 +5,7 @@ const {
 } = require('../db/repositories');
 
 class RunsController {
-  create(req, res) {
+  async create(req, res) {
     const {
       id,
       line_id,
@@ -24,7 +24,7 @@ class RunsController {
       });
     }
 
-    const run = createProductionRun({
+    const run = await createProductionRun({
       id,
       line_id,
       shift_id,
@@ -38,23 +38,23 @@ class RunsController {
     return res.status(201).json({ data: run });
   }
 
-  get(req, res) {
+  async get(req, res) {
     const { runId } = req.params;
-    const run = getProductionRunById(runId);
+    const run = await getProductionRunById(runId);
     if (!run) {
       return res.status(404).json({ status: 'error', message: 'Run not found' });
     }
     return res.status(200).json({ data: run });
   }
 
-  end(req, res) {
+  async end(req, res) {
     const { runId } = req.params;
     const { ended_at } = req.body || {};
     if (!ended_at) {
       return res.status(400).json({ status: 'error', message: 'ended_at is required' });
     }
 
-    const run = endProductionRun(runId, ended_at);
+    const run = await endProductionRun(runId, ended_at);
     if (!run) {
       return res.status(404).json({ status: 'error', message: 'Run not found' });
     }

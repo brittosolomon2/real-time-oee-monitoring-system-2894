@@ -1,182 +1,196 @@
-const fs = require('fs');
-const path = require('path');
-const Database = require('better-sqlite3');
+const { Pool } = require('pg');
 
-let dbInstance = null;
+let pool = null;
 
 /**
- * Returns the on-disk path for the SQLite database file.
- * Uses env var SQLITE_DB_PATH if provided; otherwise defaults to ./data/oee.sqlite.
+ * PUBLIC_INTERFACE
+ * Returns the configured PostgreSQL connection string.
+ * @returns {string}
  */
-function getDbFilePath() {
-  const configured = process.env.SQLITE_DB_PATH;
-  if (configured && configured.trim().length > 0) {
-    return configured.trim();
+function getDatabaseUrl() {
+  const url = process.env.DATABASE_URL;
+  if (!url || url.trim().length === 0) {
+    throw new Error(
+      'DATABASE_URL is not set. Please configure a PostgreSQL connection string in the environment.'
+    );
   }
-  // Default inside container repo
-  return path.join(__dirname, '..', '..', 'data', 'oee.sqlite');
+  return url.trim();
 }
 
 /**
- * Ensures the directory for the DB file exists.
+ * PUBLIC_INTERFACE
+ * Initialize and return a singleton pg Pool.
+ * @returns {import('pg').Pool}
  */
-function ensureDbDir(dbFilePath) {
-  const dir = path.dirname(dbFilePath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+function getDb() {
+  if (pool) return pool;
+
+  const connectionString = getDatabaseUrl();
+
+  // Allow local dev with self-signed certs by toggling PGSSLMODE=require, etc.
+  // This keeps defaults safe without hardcoding secrets.
+  const ssl =
+    String(process.env.PGSSLMODE || '').toLowerCase() === 'require'
+      ? { rejectUnauthorized: false }
+      : undefined;
+
+  pool = new Pool({ connectionString, ssl });
+
+  // Avoid unhandled errors crashing the process without context.
+  pool.on('error', (err) => {
+    // eslint-disable-next-line no-console
+    console.error('Unexpected PostgreSQL pool error:', err);
+  });
+
+  return pool;
 }
 
 /**
- * Executes the schema creation statements. Safe to run multiple times.
+ * Creates required tables and indexes if they do not exist.
+ * Safe to run multiple times.
+ * @param {import('pg').Pool} db
  */
-function applySchema(db) {
-  // Pragmas for better reliability
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
-
-  // For simple migrations: track schema version.
-  db.exec(`
+async function applySchema(db) {
+  // Keep statements mostly single-purpose for easier troubleshooting.
+  await db.query(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       version INTEGER PRIMARY KEY,
-      applied_at TEXT NOT NULL
+      applied_at TIMESTAMPTZ NOT NULL
     );
   `);
 
-  // v1 schema
-  const v1Applied = db.prepare('SELECT 1 FROM schema_migrations WHERE version = ?').get(1);
-  if (!v1Applied) {
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS lines (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      );
+  const v1 = await db.query('SELECT 1 FROM schema_migrations WHERE version = $1', [1]);
+  if (v1.rowCount > 0) return;
 
-      CREATE TABLE IF NOT EXISTS shifts (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        start_time TEXT NOT NULL, -- HH:MM
-        end_time TEXT NOT NULL,   -- HH:MM
-        created_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS production_runs (
-        id TEXT PRIMARY KEY,
-        line_id TEXT NOT NULL REFERENCES lines(id) ON DELETE CASCADE,
-        shift_id TEXT REFERENCES shifts(id) ON DELETE SET NULL,
-        product_code TEXT,
-        started_at TEXT NOT NULL, -- ISO
-        ended_at TEXT,            -- ISO
-        planned_production_seconds INTEGER NOT NULL DEFAULT 0,
-        ideal_cycle_time_seconds REAL NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_production_runs_line_id ON production_runs(line_id);
-      CREATE INDEX IF NOT EXISTS idx_production_runs_started_at ON production_runs(started_at);
-
-      CREATE TABLE IF NOT EXISTS downtime_events (
-        id TEXT PRIMARY KEY,
-        run_id TEXT NOT NULL REFERENCES production_runs(id) ON DELETE CASCADE,
-        reason TEXT,
-        started_at TEXT NOT NULL, -- ISO
-        ended_at TEXT,            -- ISO
-        created_at TEXT NOT NULL
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_downtime_events_run_id ON downtime_events(run_id);
-
-      CREATE TABLE IF NOT EXISTS quality_events (
-        id TEXT PRIMARY KEY,
-        run_id TEXT NOT NULL REFERENCES production_runs(id) ON DELETE CASCADE,
-        good_count INTEGER NOT NULL DEFAULT 0,
-        reject_count INTEGER NOT NULL DEFAULT 0,
-        occurred_at TEXT NOT NULL, -- ISO
-        created_at TEXT NOT NULL
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_quality_events_run_id ON quality_events(run_id);
-      CREATE INDEX IF NOT EXISTS idx_quality_events_occurred_at ON quality_events(occurred_at);
-    `);
-
-    db.prepare('INSERT INTO schema_migrations(version, applied_at) VALUES(?, ?)').run(
-      1,
-      new Date().toISOString()
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS lines (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL
     );
-  }
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS shifts (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      start_time TEXT NOT NULL,
+      end_time TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL
+    );
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS production_runs (
+      id TEXT PRIMARY KEY,
+      line_id TEXT NOT NULL REFERENCES lines(id) ON DELETE CASCADE,
+      shift_id TEXT REFERENCES shifts(id) ON DELETE SET NULL,
+      product_code TEXT,
+      started_at TIMESTAMPTZ NOT NULL,
+      ended_at TIMESTAMPTZ,
+      planned_production_seconds INTEGER NOT NULL DEFAULT 0,
+      ideal_cycle_time_seconds DOUBLE PRECISION NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL
+    );
+  `);
+
+  await db.query('CREATE INDEX IF NOT EXISTS idx_production_runs_line_id ON production_runs(line_id);');
+  await db.query(
+    'CREATE INDEX IF NOT EXISTS idx_production_runs_started_at ON production_runs(started_at);'
+  );
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS downtime_events (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL REFERENCES production_runs(id) ON DELETE CASCADE,
+      reason TEXT,
+      started_at TIMESTAMPTZ NOT NULL,
+      ended_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL
+    );
+  `);
+
+  await db.query('CREATE INDEX IF NOT EXISTS idx_downtime_events_run_id ON downtime_events(run_id);');
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS quality_events (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL REFERENCES production_runs(id) ON DELETE CASCADE,
+      good_count INTEGER NOT NULL DEFAULT 0,
+      reject_count INTEGER NOT NULL DEFAULT 0,
+      occurred_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL
+    );
+  `);
+
+  await db.query('CREATE INDEX IF NOT EXISTS idx_quality_events_run_id ON quality_events(run_id);');
+  await db.query(
+    'CREATE INDEX IF NOT EXISTS idx_quality_events_occurred_at ON quality_events(occurred_at);'
+  );
+
+  await db.query('INSERT INTO schema_migrations(version, applied_at) VALUES($1, NOW())', [1]);
 }
 
 /**
- * Inserts a small set of seed data if the tables are empty.
+ * Inserts a small set of seed data if tables are empty.
+ * @param {import('pg').Pool} db
  */
-function seedIfNeeded(db) {
-  const lineCount = db.prepare('SELECT COUNT(1) as c FROM lines').get().c;
-  if (lineCount === 0) {
-    const now = new Date().toISOString();
-    db.prepare('INSERT INTO lines(id, name, created_at) VALUES(?, ?, ?)').run('line-1', 'Line 1', now);
-    db.prepare('INSERT INTO lines(id, name, created_at) VALUES(?, ?, ?)').run('line-2', 'Line 2', now);
+async function seedIfNeeded(db) {
+  const lineCountRes = await db.query('SELECT COUNT(1)::int as c FROM lines');
+  if (lineCountRes.rows[0].c === 0) {
+    await db.query('INSERT INTO lines(id, name, created_at) VALUES($1, $2, NOW())', [
+      'line-1',
+      'Line 1',
+    ]);
+    await db.query('INSERT INTO lines(id, name, created_at) VALUES($1, $2, NOW())', [
+      'line-2',
+      'Line 2',
+    ]);
   }
 
-  const shiftCount = db.prepare('SELECT COUNT(1) as c FROM shifts').get().c;
-  if (shiftCount === 0) {
-    const now = new Date().toISOString();
-    db.prepare('INSERT INTO shifts(id, name, start_time, end_time, created_at) VALUES(?, ?, ?, ?, ?)').run(
-      'shift-a',
-      'Shift A',
-      '06:00',
-      '14:00',
-      now
+  const shiftCountRes = await db.query('SELECT COUNT(1)::int as c FROM shifts');
+  if (shiftCountRes.rows[0].c === 0) {
+    await db.query(
+      'INSERT INTO shifts(id, name, start_time, end_time, created_at) VALUES($1, $2, $3, $4, NOW())',
+      ['shift-a', 'Shift A', '06:00', '14:00']
     );
-    db.prepare('INSERT INTO shifts(id, name, start_time, end_time, created_at) VALUES(?, ?, ?, ?, ?)').run(
-      'shift-b',
-      'Shift B',
-      '14:00',
-      '22:00',
-      now
+    await db.query(
+      'INSERT INTO shifts(id, name, start_time, end_time, created_at) VALUES($1, $2, $3, $4, NOW())',
+      ['shift-b', 'Shift B', '14:00', '22:00']
     );
-    db.prepare('INSERT INTO shifts(id, name, start_time, end_time, created_at) VALUES(?, ?, ?, ?, ?)').run(
-      'shift-c',
-      'Shift C',
-      '22:00',
-      '06:00',
-      now
+    await db.query(
+      'INSERT INTO shifts(id, name, start_time, end_time, created_at) VALUES($1, $2, $3, $4, NOW())',
+      ['shift-c', 'Shift C', '22:00', '06:00']
     );
   }
 }
 
 /**
  * PUBLIC_INTERFACE
- * Initializes and returns a singleton SQLite connection.
- * Also applies schema and seed data on first initialization.
- * @returns {import('better-sqlite3').Database}
+ * Initializes schema + seed data (idempotent). Call on server startup.
+ * @returns {Promise<void>}
  */
-function getDb() {
-  if (dbInstance) return dbInstance;
-
-  const dbFilePath = getDbFilePath();
-  ensureDbDir(dbFilePath);
-
-  const db = new Database(dbFilePath);
-  applySchema(db);
-  seedIfNeeded(db);
-
-  dbInstance = db;
-  return dbInstance;
+async function initDb() {
+  const db = getDb();
+  await applySchema(db);
+  await seedIfNeeded(db);
 }
 
 /**
  * PUBLIC_INTERFACE
- * Gracefully closes the database connection (if open).
+ * Gracefully closes the database pool (if open).
+ * @returns {Promise<void>}
  */
-function closeDb() {
-  if (dbInstance) {
-    dbInstance.close();
-    dbInstance = null;
+async function closeDb() {
+  if (pool) {
+    const p = pool;
+    pool = null;
+    await p.end();
   }
 }
 
 module.exports = {
   getDb,
+  initDb,
   closeDb,
 };

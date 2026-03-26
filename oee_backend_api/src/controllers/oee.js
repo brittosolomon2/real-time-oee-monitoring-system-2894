@@ -1,9 +1,9 @@
 const { calculateOeeForRun } = require('../services/oee');
 
 class OeeController {
-  getForRun(req, res) {
+  async getForRun(req, res) {
     const { runId } = req.params;
-    const result = calculateOeeForRun(runId);
+    const result = await calculateOeeForRun(runId);
     if (!result) {
       return res.status(404).json({ status: 'error', message: 'Run not found' });
     }

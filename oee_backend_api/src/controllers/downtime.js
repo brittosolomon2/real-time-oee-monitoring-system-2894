@@ -1,7 +1,7 @@
 const { createDowntimeEvent, getProductionRunById } = require('../db/repositories');
 
 class DowntimeController {
-  create(req, res) {
+  async create(req, res) {
     const { run_id, reason, started_at, ended_at } = req.body || {};
     if (!run_id || !started_at) {
       return res.status(400).json({
@@ -10,12 +10,12 @@ class DowntimeController {
       });
     }
 
-    const run = getProductionRunById(run_id);
+    const run = await getProductionRunById(run_id);
     if (!run) {
       return res.status(404).json({ status: 'error', message: 'Run not found' });
     }
 
-    const evt = createDowntimeEvent({ run_id, reason, started_at, ended_at });
+    const evt = await createDowntimeEvent({ run_id, reason, started_at, ended_at });
     return res.status(201).json({ data: evt });
   }
 }
